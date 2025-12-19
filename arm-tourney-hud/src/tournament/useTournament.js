@@ -1,5 +1,5 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { createTestTournamentState } from "./testData.js";
+// import { createTestTournamentState } from "./testData.js";
 
 
 /**
@@ -11,6 +11,11 @@ import { createTestTournamentState } from "./testData.js";
  */
 
 const LS_KEY = "arm-tourney-hud-demo-v1";
+
+// function demoState() {
+//     return createTestTournamentState();
+//   }
+  
 
 function demoState() {
   return {
