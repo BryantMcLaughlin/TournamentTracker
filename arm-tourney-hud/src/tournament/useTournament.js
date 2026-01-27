@@ -1,336 +1,403 @@
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-// import { createTestTournamentState } from "./testData.js";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
+const DEFAULT_BASE_URL = "https://brackets-production.up.railway.app";
+const LS_TOURNEY_ID = "arm-tourney-hud:tournament-id";
+const LS_AVG_MATCH = "arm-tourney-hud:avg-match-seconds";
 
-/**
- * Data model:
- * tables: [{ id, name }]
- * queue:  [{ id, weightClass, division, round, athletes: {a,b}, bestOf, scheduledTableId? }]
- * currentByTable: { [tableId]: { matchId, startedAtMs, match } }
- * history: [{ matchId, tableId, durationSeconds, weightClass, endedAtMs }]
- */
+const BRACKET_LABELS = {
+  CH: "Championship",
+  WB: "Winners",
+  LB: "Losers",
+  P5: "5th Place",
+};
 
-const LS_KEY = "arm-tourney-hud-demo-v1";
+const BRACKET_ORDER = {
+  CH: 0,
+  WB: 1,
+  LB: 2,
+  P5: 3,
+};
 
-// function demoState() {
-//     return createTestTournamentState();
-//   }
-  
-
-function demoState() {
-  return {
-    tables: [
-      { id: "t1", name: "Table 1" },
-      { id: "t2", name: "Table 2" },
-    ],
-    queue: [
-      {
-        id: "m101",
-        weightClass: "176",
-        division: "RH",
-        round: "QF",
-        bestOf: 1,
-        athletes: { a: "Kyler L.", b: "Brandon M." },
-        scheduledTableId: "t1",
-      },
-      {
-        id: "m102",
-        weightClass: "176",
-        division: "RH",
-        round: "QF",
-        bestOf: 1,
-        athletes: { a: "Eli S.", b: "Noah T." },
-        scheduledTableId: "t2",
-      },
-      {
-        id: "m103",
-        weightClass: "198",
-        division: "LH",
-        round: "R1",
-        bestOf: 1,
-        athletes: { a: "Sam P.", b: "Diego R." },
-      },
-      {
-        id: "m104",
-        weightClass: "198",
-        division: "LH",
-        round: "R1",
-        bestOf: 1,
-        athletes: { a: "Jared K.", b: "Miles V." },
-      },
-      {
-        id: "m105",
-        weightClass: "220",
-        division: "RH",
-        round: "SF",
-        bestOf: 3,
-        athletes: { a: "Alex J.", b: "Cole W." },
-      },
-    ],
-    currentByTable: {
-      t1: null,
-      t2: null,
-    },
-    history: [],
-  };
+function getBaseUrl() {
+  const envUrl = import.meta.env.VITE_BRACKET_SYNC_URL;
+  const raw = envUrl && String(envUrl).trim() ? envUrl : DEFAULT_BASE_URL;
+  return raw.endsWith("/") ? raw.slice(0, -1) : raw;
 }
 
-function loadState() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return demoState();
-    const parsed = JSON.parse(raw);
-    // shallow validation
-    if (!parsed.tables || !parsed.queue || !parsed.currentByTable || !parsed.history) return demoState();
-    return parsed;
-  } catch {
-    return demoState();
-  }
+function loadString(key, fallback) {
+  if (typeof localStorage === "undefined") return fallback;
+  const raw = localStorage.getItem(key);
+  return raw == null ? fallback : raw;
 }
 
-function saveState(state) {
-  localStorage.setItem(LS_KEY, JSON.stringify(state));
+function loadNumber(key, fallback) {
+  if (typeof localStorage === "undefined") return fallback;
+  const raw = localStorage.getItem(key);
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeText(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function bracketTypeLabel(code) {
+  if (!code) return "Bracket";
+  return BRACKET_LABELS[code] || code;
+}
+
+function displayAthlete(athlete) {
+  if (!athlete) return "TBD";
+  if (athlete.bye) return "BYE";
+  return athlete.name || "TBD";
+}
+
+function matchRoundLabel(match) {
+  if (match.label) return match.label;
+  if (Number.isFinite(match.round)) return `Round ${match.round}`;
+  return "Match";
+}
+
+function matchOrderValue(match) {
+  const bracketOrder = BRACKET_ORDER[match.bracket] ?? 4;
+  const round = Number.isFinite(match.round) ? match.round : 999;
+  return bracketOrder * 1000 + round;
+}
+
+function compareMatches(a, b) {
+  const order = matchOrderValue(a) - matchOrderValue(b);
+  if (order !== 0) return order;
+  if (a.bracketId !== b.bracketId) return String(a.bracketId).localeCompare(String(b.bracketId));
+  return String(a.id).localeCompare(String(b.id));
+}
+
+function isReadyMatch(match) {
+  return !match.done && match.p1 && match.p2;
+}
+
+function estimateDurationSeconds(match, base) {
+  if (!Number.isFinite(base) || base <= 0) return 75;
+  if (match.bestOf === 3) return base * 1.8;
+  if (match.bestOf === 5) return base * 2.4;
+  return base;
 }
 
 export function useTournament() {
+  const baseUrl = getBaseUrl();
   const nowMs = ref(Date.now());
-  const tick = setInterval(() => (nowMs.value = Date.now()), 250);
+  const tick = setInterval(() => (nowMs.value = Date.now()), 1000);
 
-  const state = reactive(loadState());
+  const tournaments = ref([]);
+  const tournamentsStatus = ref("idle");
+  const tournamentsError = ref(null);
 
-  const tables = computed(() => state.tables);
-  const queue = computed(() => state.queue);
+  const selectedTournamentId = ref(loadString(LS_TOURNEY_ID, ""));
+  const tournament = ref(null);
+  const connectionStatus = ref("idle");
+  const connectionError = ref(null);
+  const lastEventAt = ref(null);
 
-  const currentByTable = computed(() => state.currentByTable);
+  const avgMatchSeconds = ref(loadNumber(LS_AVG_MATCH, 75));
 
-  const upNextByTable = computed(() => {
-    const result = {};
-    for (const t of state.tables) {
-      result[t.id] = findNextForTable(t.id, state.queue);
+  let eventSource = null;
+  let refreshTimer = null;
+
+  watch(selectedTournamentId, (value) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(LS_TOURNEY_ID, value || "");
     }
-    return result;
   });
 
-  const etaByTable = computed(() => {
-    const result = {};
-    for (const t of state.tables) {
-      result[t.id] = estimateSecondsUntilNextOnTable(t.id, state, nowMs.value);
+  watch(avgMatchSeconds, (value) => {
+    if (!Number.isFinite(value)) return;
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(LS_AVG_MATCH, String(value));
     }
-    return result;
   });
 
-  const metrics = computed(() => {
-    const total = state.history.length + state.queue.length + Object.values(state.currentByTable).filter(Boolean).length;
-    const completed = state.history.length;
-
-    const durations = state.history.map(h => h.durationSeconds).filter(n => Number.isFinite(n) && n > 0);
-    const avgMatchSeconds = durations.length ? durations.reduce((a,b)=>a+b,0) / durations.length : 75;
-
-    // Throughput: use last 30 minutes of finished matches (fallback to avg)
-    const windowMs = 30 * 60 * 1000;
-    const cutoff = nowMs.value - windowMs;
-    const recent = state.history.filter(h => h.endedAtMs >= cutoff);
-    const matchesPerHour = recent.length ? (recent.length / (windowMs / 3600000)) : (3600 / avgMatchSeconds);
-
-    // By weight class (completed)
-    const byWeight = {};
-    for (const h of state.history) {
-      const w = h.weightClass || "Unknown";
-      byWeight[w] = (byWeight[w] || 0) + 1;
-    }
-
-    return {
-      total,
-      completed,
-      avgMatchSeconds,
-      matchesPerHour,
-      byWeight,
-      historyCount: state.history.length,
-      queueCount: state.queue.length,
-      activeTables: Object.values(state.currentByTable).filter(Boolean).length,
-    };
+  const payload = computed(() => tournament.value?.payload ?? null);
+  const meta = computed(() => tournament.value?.meta ?? {});
+  const tournamentName = computed(() => {
+    return (
+      payload.value?.tournament_name ||
+      meta.value?.tournament_name ||
+      meta.value?.name ||
+      "Tournament"
+    );
   });
 
-  function estimateForMatch(matchId) {
-    const idx = state.queue.findIndex(m => m.id === matchId);
-    if (idx === -1) return null;
+  const activeBracketId = computed(() => payload.value?.active_bracket_id ?? null);
+  const serverVersion = computed(() => tournament.value?.server_version ?? null);
+  const updatedAt = computed(() => tournament.value?.updated_at ?? null);
+  const createdAt = computed(() => tournament.value?.created_at ?? null);
+  const exportedAt = computed(() => payload.value?.exported_at ?? null);
+  const mode = computed(() => payload.value?.mode ?? null);
 
-    // Determine which table it will likely land on:
-    const match = state.queue[idx];
-    const tableId = match.scheduledTableId || pickLeastLoadedTableId(state);
-    if (!tableId) return null;
-
-    // Seconds until it starts = remaining time on current + estimated time of any earlier queue items assigned to that table
-    const eta = estimateSecondsUntilMatchOnTable(matchId, tableId, state, nowMs.value);
-    return { tableId, etaSeconds: eta };
-  }
-
-  function startMatch(tableId) {
-    if (state.currentByTable[tableId]) return;
-
-    // pop next match for that table (prefer scheduled)
-    const next = findNextForTable(tableId, state.queue);
-    if (!next) return;
-
-    // remove from queue
-    state.queue = state.queue.filter(m => m.id !== next.id);
-
-    state.currentByTable[tableId] = {
-      matchId: next.id,
-      startedAtMs: nowMs.value,
-      match: next,
-    };
-  }
-
-  function finishMatch(tableId) {
-    const cur = state.currentByTable[tableId];
-    if (!cur) return;
-
-    const durationSeconds = Math.max(5, Math.round((nowMs.value - cur.startedAtMs) / 1000));
-    state.history.push({
-      matchId: cur.matchId,
-      tableId,
-      durationSeconds,
-      weightClass: cur.match?.weightClass,
-      endedAtMs: nowMs.value,
+  const matches = computed(() => {
+    if (!payload.value?.brackets?.length) return [];
+    const flattened = [];
+    payload.value.brackets.forEach((bracket, bracketIndex) => {
+      const bracketName = bracket.name || `Bracket ${bracketIndex + 1}`;
+      const bracketId = bracket.id || `${bracketIndex}`;
+      (bracket.matches || []).forEach((match) => {
+        const p1Name = displayAthlete(match.p1);
+        const p2Name = displayAthlete(match.p2);
+        const bracketLabel = bracketTypeLabel(match.bracket);
+        const status = match.done ? "done" : match.p1 && match.p2 ? "ready" : "waiting";
+        flattened.push({
+          ...match,
+          bracketId,
+          bracketName,
+          bracketLabel,
+          roundLabel: matchRoundLabel(match),
+          p1Name,
+          p2Name,
+          status,
+          searchText: normalizeText(`${p1Name} ${p2Name}`),
+        });
+      });
     });
+    return flattened;
+  });
 
-    state.currentByTable[tableId] = null;
-  }
+  const readyQueue = computed(() => {
+    const activeId = activeBracketId.value;
+    const ready = matches.value.filter(isReadyMatch).sort((a, b) => {
+      if (activeId) {
+        const aActive = a.bracketId === activeId;
+        const bActive = b.bracketId === activeId;
+        if (aActive && !bActive) return -1;
+        if (bActive && !aActive) return 1;
+      }
+      return compareMatches(a, b);
+    });
+    let elapsed = 0;
+    return ready.map((match) => {
+      const durationSeconds = estimateDurationSeconds(match, avgMatchSeconds.value);
+      const etaSeconds = elapsed;
+      elapsed += durationSeconds;
+      return { ...match, etaSeconds, durationSeconds };
+    });
+  });
 
-  function advanceQueue() {
-    // convenience: start matches on all idle tables
-    for (const t of state.tables) {
-      if (!state.currentByTable[t.id]) startMatch(t.id);
+  const bracketSummary = computed(() => {
+    if (!payload.value?.brackets?.length) return [];
+    return payload.value.brackets.map((bracket, bracketIndex) => {
+      const bracketName = bracket.name || `Bracket ${bracketIndex + 1}`;
+      const bracketId = bracket.id || `${bracketIndex}`;
+      const bracketMatches = (bracket.matches || []).map((match) => ({
+        ...match,
+        bracketId,
+        bracketName,
+        bracketLabel: bracketTypeLabel(match.bracket),
+        roundLabel: matchRoundLabel(match),
+        p1Name: displayAthlete(match.p1),
+        p2Name: displayAthlete(match.p2),
+      }));
+      const doneCount = bracketMatches.filter((m) => m.done).length;
+      const readyMatches = bracketMatches.filter(isReadyMatch).sort(compareMatches);
+      const readyCount = readyMatches.length;
+      const waitingCount = bracketMatches.length - doneCount - readyCount;
+      const total = bracketMatches.length;
+      const progress = total ? Math.round((doneCount / total) * 100) : 0;
+      return {
+        id: bracketId,
+        name: bracketName,
+        total,
+        doneCount,
+        readyCount,
+        waitingCount,
+        progress,
+        nextReady: readyMatches[0] || null,
+        finalSeries: bracket.final_series || null,
+      };
+    });
+  });
+
+  const stats = computed(() => {
+    const totalMatches = matches.value.length;
+    const doneCount = matches.value.filter((m) => m.done).length;
+    const readyCount = matches.value.filter((m) => m.status === "ready").length;
+    const waitingCount = matches.value.filter((m) => m.status === "waiting").length;
+    const athletes = new Map();
+    if (payload.value?.brackets?.length) {
+      payload.value.brackets.forEach((bracket) => {
+        (bracket.athletes || []).forEach((athlete) => {
+          if (!athlete) return;
+          const key = athlete.id || athlete.name;
+          if (!key) return;
+          athletes.set(key, athlete);
+        });
+      });
+    }
+    return {
+      totalMatches,
+      doneCount,
+      readyCount,
+      waitingCount,
+      athleteCount: athletes.size,
+      bracketCount: payload.value?.brackets?.length || 0,
+    };
+  });
+
+  async function refreshTournaments() {
+    tournamentsStatus.value = "loading";
+    tournamentsError.value = null;
+    try {
+      const res = await fetch(`${baseUrl}/api/tournaments`);
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      const data = await res.json();
+      if (!data.ok) throw new Error("Server error");
+      tournaments.value = (data.tournaments || []).slice().sort((a, b) => {
+        const aTime = new Date(a.updated_at || 0).getTime();
+        const bTime = new Date(b.updated_at || 0).getTime();
+        return bTime - aTime;
+      });
+      tournamentsStatus.value = "ready";
+    } catch (error) {
+      tournamentsStatus.value = "error";
+      tournamentsError.value = error?.message || "Failed to load tournaments";
     }
   }
 
-  function resetDemo() {
-    const fresh = demoState();
-    state.tables = fresh.tables;
-    state.queue = fresh.queue;
-    state.currentByTable = fresh.currentByTable;
-    state.history = fresh.history;
+  async function fetchSnapshot(tournamentId) {
+    if (!tournamentId) return;
+    connectionError.value = null;
+    try {
+      const res = await fetch(`${baseUrl}/api/tournaments/${encodeURIComponent(tournamentId)}`);
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      const data = await res.json();
+      if (!data.ok) throw new Error("Tournament not found");
+      applySnapshot(data.tournament);
+    } catch (error) {
+      connectionError.value = error?.message || "Failed to load snapshot";
+    }
   }
 
-  function fmtSec(seconds) {
-    if (seconds == null) return "—";
-    const s = Math.max(0, Math.round(seconds));
-    const m = Math.floor(s / 60);
-    const r = s % 60;
-    if (m <= 0) return `${r}s`;
-    return `${m}m ${String(r).padStart(2, "0")}s`;
+  function applySnapshot(snapshot) {
+    if (!snapshot) return;
+    tournament.value = snapshot;
+    lastEventAt.value = Date.now();
   }
 
-  // Persist to localStorage
+  function handleHello(event) {
+    const data = safeParseEvent(event);
+    if (!data) return;
+    if (!tournament.value) {
+      tournament.value = {
+        id: data.tournament_id,
+        server_version: data.server_version,
+        updated_at: data.updated_at || null,
+        created_at: null,
+        payload: null,
+        meta: null,
+      };
+    }
+    lastEventAt.value = Date.now();
+  }
+
+  function safeParseEvent(event) {
+    if (!event?.data) return null;
+    try {
+      return JSON.parse(event.data);
+    } catch {
+      return null;
+    }
+  }
+
+  function connectStream(tournamentId) {
+    if (!tournamentId) return;
+    disconnectStream();
+    connectionStatus.value = "connecting";
+    connectionError.value = null;
+    const url = `${baseUrl}/api/tournaments/${encodeURIComponent(tournamentId)}/stream`;
+    eventSource = new EventSource(url);
+    eventSource.onopen = () => {
+      connectionStatus.value = "connected";
+    };
+    eventSource.onerror = () => {
+      connectionStatus.value = "reconnecting";
+    };
+    eventSource.addEventListener("snapshot", (event) => {
+      const data = safeParseEvent(event);
+      if (!data) return;
+      applySnapshot({
+        id: data.tournament_id,
+        server_version: data.server_version,
+        updated_at: data.updated_at,
+        created_at: null,
+        payload: data.payload,
+        meta: data.meta || null,
+      });
+    });
+    eventSource.addEventListener("hello", handleHello);
+    eventSource.addEventListener("ping", () => {
+      lastEventAt.value = Date.now();
+    });
+  }
+
+  function disconnectStream() {
+    if (!eventSource) return;
+    eventSource.close();
+    eventSource = null;
+    connectionStatus.value = "idle";
+  }
+
+  function setTournamentId(id) {
+    selectedTournamentId.value = String(id || "").trim();
+  }
+
   watch(
-    () => ({ tables: state.tables, queue: state.queue, currentByTable: state.currentByTable, history: state.history }),
-    () => saveState(state),
-    { deep: true }
+    selectedTournamentId,
+    (id) => {
+      if (!id) {
+        disconnectStream();
+        tournament.value = null;
+        return;
+      }
+      fetchSnapshot(id);
+      connectStream(id);
+    },
+    { immediate: true }
   );
 
-  onBeforeUnmount(() => clearInterval(tick));
+  onMounted(() => {
+    refreshTournaments();
+    refreshTimer = setInterval(refreshTournaments, 60000);
+  });
+
+  onBeforeUnmount(() => {
+    clearInterval(tick);
+    disconnectStream();
+    if (refreshTimer) clearInterval(refreshTimer);
+  });
 
   return {
+    baseUrl,
     nowMs,
-    tables,
-    queue,
-    currentByTable,
-    upNextByTable,
-    etaByTable,
-    metrics,
-    estimateForMatch,
-    startMatch,
-    finishMatch,
-    advanceQueue,
-    resetDemo,
-    fmtSec
+    tournaments,
+    tournamentsStatus,
+    tournamentsError,
+    selectedTournamentId,
+    setTournamentId,
+    refreshTournaments,
+    tournament,
+    payload,
+    meta,
+    tournamentName,
+    activeBracketId,
+    serverVersion,
+    updatedAt,
+    createdAt,
+    exportedAt,
+    mode,
+    connectionStatus,
+    connectionError,
+    lastEventAt,
+    matches,
+    readyQueue,
+    bracketSummary,
+    stats,
+    avgMatchSeconds,
   };
-}
-
-/* ----------------- Estimation helpers ----------------- */
-
-function findNextForTable(tableId, queue) {
-  // Prefer explicit scheduledTableId first
-  const scheduled = queue.find(m => m.scheduledTableId === tableId);
-  if (scheduled) return scheduled;
-  // Otherwise just take first (you can replace with your own scheduling rules)
-  return queue[0] || null;
-}
-
-function pickLeastLoadedTableId(state) {
-  const tableIds = state.tables.map(t => t.id);
-  if (!tableIds.length) return null;
-  const loads = {};
-  for (const id of tableIds) loads[id] = 0;
-
-  // count queued scheduled
-  for (const m of state.queue) {
-    const tid = m.scheduledTableId;
-    if (tid && loads[tid] != null) loads[tid] += 1;
-  }
-  // active matches weigh more
-  for (const id of tableIds) {
-    if (state.currentByTable[id]) loads[id] += 2;
-  }
-
-  return tableIds.sort((a,b) => loads[a] - loads[b])[0];
-}
-
-function averageForWeightClass(state, weightClass) {
-  // Use history average for this weight class; fallback to global avg; fallback to 75s
-  const hist = state.history.filter(h => h.weightClass === weightClass).map(h => h.durationSeconds);
-  if (hist.length >= 3) return hist.reduce((a,b)=>a+b,0) / hist.length;
-
-  const all = state.history.map(h => h.durationSeconds);
-  if (all.length) return all.reduce((a,b)=>a+b,0) / all.length;
-
-  return 75;
-}
-
-function estimateRemainingCurrentSeconds(state, tableId, nowMs) {
-  const cur = state.currentByTable[tableId];
-  if (!cur) return 0;
-
-  const elapsed = (nowMs - cur.startedAtMs) / 1000;
-  const expected = averageForWeightClass(state, cur.match?.weightClass);
-  // clamp: remaining can’t go below 5s to avoid flicker
-  return Math.max(5, expected - elapsed);
-}
-
-function estimateSecondsUntilNextOnTable(tableId, state, nowMs) {
-  const next = findNextForTable(tableId, state.queue);
-  if (!next) return null;
-
-  const remainingCur = estimateRemainingCurrentSeconds(state, tableId, nowMs);
-  return remainingCur; // since “next” is the immediate one after current
-}
-
-function estimateSecondsUntilMatchOnTable(matchId, tableId, state, nowMs) {
-  // Remaining on current
-  let seconds = estimateRemainingCurrentSeconds(state, tableId, nowMs);
-
-  // Add estimated durations for any queued matches that will run on that table before matchId
-  const ordered = orderQueueForTable(tableId, state.queue);
-
-  for (const m of ordered) {
-    if (m.id === matchId) break;
-    seconds += estimateDurationForQueuedMatch(state, m);
-  }
-
-  return seconds;
-}
-
-function orderQueueForTable(tableId, queue) {
-  // Put scheduled for this table first, then unscheduled, preserving relative order
-  const scheduled = queue.filter(m => m.scheduledTableId === tableId);
-  const other = queue.filter(m => !m.scheduledTableId);
-  return [...scheduled, ...other];
-}
-
-function estimateDurationForQueuedMatch(state, match) {
-  const base = averageForWeightClass(state, match.weightClass);
-  // bestOf scaling (very rough): bestOf 3 tends to run longer
-  const scale = match.bestOf === 3 ? 1.8 : 1.0;
-  return base * scale;
 }
