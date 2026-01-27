@@ -1,5 +1,18 @@
-# Vue 3 + Vite
+# Tournament Tracker HUD
 
-This template should help get you started developing with Vue 3 in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+Lightweight Vue 3 + Vite dashboard for monitoring live tournament brackets. Connect with a tournament ID to see the ready queue, athlete lookups, bracket summaries, and live stats streamed from the bracket sync API.
 
-Learn more about IDE Support for Vue in the [Vue Docs Scaling up Guide](https://vuejs.org/guide/scaling-up/tooling.html#ide-support).
+## Quick start
+- Install Node.js 18+ and npm.
+- Install deps: `npm install`
+- Start dev server: `npm run dev` (default on http://localhost:5173)
+- Build for production: `npm run build`
+- Preview the build: `npm run preview`
+
+## Configuration
+- Optional: set `VITE_BRACKET_SYNC_URL` in `.env.local` to point at your bracket sync API.  
+  Defaults to `https://brackets-production.up.railway.app`.
+
+## Usage
+- Enter a tournament ID to connect; recent tournaments load automatically.
+- The HUD streams updates (SSE) and shows ready matches with ETA estimates, athlete-specific upcoming matches, and per-bracket progress counts.
