@@ -49,15 +49,41 @@
   </script>
   
   <style scoped>
-  .queue { display: flex; flex-direction: column; gap: 10px; }
-  .item { display: flex; justify-content: space-between; gap: 12px; padding: 10px; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: rgba(0,0,0,.16); }
+  .queue { display: flex; flex-direction: column; gap: 12px; }
+  .item {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border-radius: 18px;
+    background: rgba(8, 12, 20, 0.85);
+    box-shadow: 0 18px 32px rgba(0, 0, 0, 0.35);
+    position: relative;
+    overflow: hidden;
+  }
+  .item::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 12px;
+    bottom: 12px;
+    width: 3px;
+    background: linear-gradient(180deg, rgba(120, 180, 255, 0.7), rgba(120, 255, 210, 0.7));
+    opacity: 0.5;
+  }
   .names { font-weight: 700; }
-  .vs { margin: 0 6px; opacity: .6; font-size: 12px; font-weight: 500; }
+  .vs { margin: 0 6px; opacity: 0.6; font-size: 12px; font-weight: 500; }
   .meta { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; }
-  .pill { font-size: 11px; padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.10); }
+  .pill {
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  }
   .right { min-width: 150px; text-align: right; }
-  .small { font-size: 11px; opacity: .75; }
+  .small { font-size: 11px; opacity: 0.75; }
   .big { font-size: 18px; font-weight: 800; margin-top: 4px; }
-  .muted { opacity: .65; }
+  .muted { opacity: 0.65; }
   </style>
   

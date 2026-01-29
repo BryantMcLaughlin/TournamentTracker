@@ -59,19 +59,51 @@
   </script>
   
   <style scoped>
-  .panel { border: 1px solid rgba(255,255,255,.10); border-radius: 14px; padding: 12px; background: rgba(0,0,0,.18); }
+  .panel {
+    border-radius: 18px;
+    padding: 14px;
+    background: rgba(10, 14, 24, 0.82);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+    position: relative;
+    overflow: hidden;
+  }
+  .panel::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 12px;
+    bottom: 12px;
+    width: 4px;
+    background: linear-gradient(180deg, rgba(120, 180, 255, 0.7), rgba(120, 255, 210, 0.7));
+    opacity: 0.6;
+  }
   .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .table { font-weight: 700; }
-  .badge { font-size: 11px; padding: 4px 8px; border-radius: 999px; background: rgba(0,255,140,.12); border: 1px solid rgba(0,255,140,.25); }
-  .badge.idle { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.12); }
+  .badge {
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(60, 220, 150, 0.15);
+    color: #7dffcf;
+  }
+  .badge.idle {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(235, 242, 255, 0.7);
+  }
   
-  .block { margin-top: 10px; }
-  .label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; opacity: .7; margin-bottom: 6px; }
+  .block { margin-top: 12px; }
+  .label { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.7; margin-bottom: 6px; }
   .names { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: center; }
   .name { font-weight: 700; }
-  .vs { opacity: .6; font-size: 12px; }
+  .vs { opacity: 0.6; font-size: 12px; }
   .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .pill { font-size: 11px; padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.10); }
-  .muted { opacity: .65; }
+  .pill {
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  }
+  .muted { opacity: 0.65; }
   </style>
   

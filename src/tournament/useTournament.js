@@ -2,7 +2,6 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const DEFAULT_BASE_URL = "https://brackets-production.up.railway.app";
 const LS_TOURNEY_ID = "arm-tourney-hud:tournament-id";
-const LS_AVG_MATCH = "arm-tourney-hud:avg-match-seconds";
 
 const BRACKET_LABELS = {
   CH: "Championship",
@@ -30,12 +29,6 @@ function loadString(key, fallback) {
   return raw == null ? fallback : raw;
 }
 
-function loadNumber(key, fallback) {
-  if (typeof localStorage === "undefined") return fallback;
-  const raw = localStorage.getItem(key);
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : fallback;
-}
 
 function normalizeText(value) {
   return String(value || "").trim().toLowerCase();
@@ -48,8 +41,15 @@ function bracketTypeLabel(code) {
 
 function displayAthlete(athlete) {
   if (!athlete) return "TBD";
-  if (athlete.bye) return "BYE";
+  if (isByeAthlete(athlete)) return "TBD";
   return athlete.name || "TBD";
+}
+
+function isByeAthlete(athlete) {
+  if (!athlete) return false;
+  if (athlete.bye) return true;
+  const name = typeof athlete === "string" ? athlete : athlete.name;
+  return String(name || "").trim().toLowerCase() === "bye";
 }
 
 function matchRoundLabel(match) {
@@ -72,7 +72,7 @@ function compareMatches(a, b) {
 }
 
 function isReadyMatch(match) {
-  return !match.done && match.p1 && match.p2;
+  return !match.done && match.p1 && match.p2 && !isByeAthlete(match.p1) && !isByeAthlete(match.p2);
 }
 
 function estimateDurationSeconds(match, base) {
@@ -97,7 +97,7 @@ export function useTournament() {
   const connectionError = ref(null);
   const lastEventAt = ref(null);
 
-  const avgMatchSeconds = ref(loadNumber(LS_AVG_MATCH, 75));
+  const avgMatchSeconds = 75;
 
   let eventSource = null;
   let refreshTimer = null;
@@ -105,13 +105,6 @@ export function useTournament() {
   watch(selectedTournamentId, (value) => {
     if (typeof localStorage !== "undefined") {
       localStorage.setItem(LS_TOURNEY_ID, value || "");
-    }
-  });
-
-  watch(avgMatchSeconds, (value) => {
-    if (!Number.isFinite(value)) return;
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem(LS_AVG_MATCH, String(value));
     }
   });
 
@@ -142,6 +135,7 @@ export function useTournament() {
       (bracket.matches || []).forEach((match) => {
         const p1Name = displayAthlete(match.p1);
         const p2Name = displayAthlete(match.p2);
+        const hasBye = isByeAthlete(match.p1) || isByeAthlete(match.p2);
         const bracketLabel = bracketTypeLabel(match.bracket);
         const status = match.done ? "done" : match.p1 && match.p2 ? "ready" : "waiting";
         flattened.push({
@@ -152,6 +146,7 @@ export function useTournament() {
           roundLabel: matchRoundLabel(match),
           p1Name,
           p2Name,
+          hasBye,
           status,
           searchText: normalizeText(`${p1Name} ${p2Name}`),
         });
@@ -173,7 +168,7 @@ export function useTournament() {
     });
     let elapsed = 0;
     return ready.map((match) => {
-      const durationSeconds = estimateDurationSeconds(match, avgMatchSeconds.value);
+      const durationSeconds = estimateDurationSeconds(match, avgMatchSeconds);
       const etaSeconds = elapsed;
       elapsed += durationSeconds;
       return { ...match, etaSeconds, durationSeconds };
@@ -398,6 +393,5 @@ export function useTournament() {
     readyQueue,
     bracketSummary,
     stats,
-    avgMatchSeconds,
   };
 }

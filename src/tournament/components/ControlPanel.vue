@@ -43,15 +43,32 @@
   </script>
   
   <style scoped>
-  .cp { display: flex; flex-direction: column; gap: 10px; }
+  .cp { display: flex; flex-direction: column; gap: 12px; }
   .controls { display: flex; gap: 10px; flex-wrap: wrap; }
-  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .tableCtl { border: 1px solid rgba(255,255,255,.10); border-radius: 14px; padding: 10px; background: rgba(0,0,0,.14); }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .tableCtl {
+    border-radius: 18px;
+    padding: 12px;
+    background: rgba(10, 14, 24, 0.8);
+    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.35);
+    position: relative;
+    overflow: hidden;
+  }
+  .tableCtl::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 12px;
+    bottom: 12px;
+    width: 3px;
+    background: linear-gradient(180deg, rgba(120, 180, 255, 0.7), rgba(120, 255, 210, 0.7));
+    opacity: 0.6;
+  }
   .hdr { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
   .name { font-weight: 800; }
-  .id { font-size: 12px; }
-  .buttons { display: flex; gap: 8px; margin: 8px 0; }
-  .muted { opacity: .65; }
+  .id { font-size: 12px; opacity: 0.7; }
+  .buttons { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
+  .muted { opacity: 0.65; }
   @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
   </style>
   
