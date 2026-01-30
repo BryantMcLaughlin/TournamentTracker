@@ -75,6 +75,11 @@ function isReadyMatch(match) {
   return !match.done && match.p1 && match.p2 && !isByeAthlete(match.p1) && !isByeAthlete(match.p2);
 }
 
+function isByeMatch(match) {
+  if (!match) return false;
+  return isByeAthlete(match.p1) || isByeAthlete(match.p2);
+}
+
 function estimateDurationSeconds(match, base) {
   if (!Number.isFinite(base) || base <= 0) return 75;
   if (match.bestOf === 3) return base * 1.8;
@@ -135,9 +140,9 @@ export function useTournament() {
       (bracket.matches || []).forEach((match) => {
         const p1Name = displayAthlete(match.p1);
         const p2Name = displayAthlete(match.p2);
-        const hasBye = isByeAthlete(match.p1) || isByeAthlete(match.p2);
+        const hasBye = isByeMatch(match);
         const bracketLabel = bracketTypeLabel(match.bracket);
-        const status = match.done ? "done" : match.p1 && match.p2 ? "ready" : "waiting";
+        const status = hasBye ? "bye" : match.done ? "done" : match.p1 && match.p2 ? "ready" : "waiting";
         flattened.push({
           ...match,
           bracketId,
@@ -189,11 +194,12 @@ export function useTournament() {
         p1Name: displayAthlete(match.p1),
         p2Name: displayAthlete(match.p2),
       }));
-      const doneCount = bracketMatches.filter((m) => m.done).length;
-      const readyMatches = bracketMatches.filter(isReadyMatch).sort(compareMatches);
+      const playableMatches = bracketMatches.filter((m) => !isByeMatch(m));
+      const doneCount = playableMatches.filter((m) => m.done).length;
+      const readyMatches = playableMatches.filter(isReadyMatch).sort(compareMatches);
       const readyCount = readyMatches.length;
-      const waitingCount = bracketMatches.length - doneCount - readyCount;
-      const total = bracketMatches.length;
+      const waitingCount = playableMatches.length - doneCount - readyCount;
+      const total = playableMatches.length;
       const progress = total ? Math.round((doneCount / total) * 100) : 0;
       return {
         id: bracketId,
@@ -210,10 +216,11 @@ export function useTournament() {
   });
 
   const stats = computed(() => {
-    const totalMatches = matches.value.length;
-    const doneCount = matches.value.filter((m) => m.done).length;
-    const readyCount = matches.value.filter((m) => m.status === "ready").length;
-    const waitingCount = matches.value.filter((m) => m.status === "waiting").length;
+    const playableMatches = matches.value.filter((m) => !isByeMatch(m));
+    const totalMatches = playableMatches.length;
+    const doneCount = playableMatches.filter((m) => m.done).length;
+    const readyCount = playableMatches.filter(isReadyMatch).length;
+    const waitingCount = playableMatches.length - doneCount - readyCount;
     const athletes = new Map();
     if (payload.value?.brackets?.length) {
       payload.value.brackets.forEach((bracket) => {
