@@ -82,9 +82,9 @@
           <Transition name="now-swap" mode="out-in">
             <div v-if="match" :key="match.key" class="now-hero">
               <div class="now-names">
-                <span class="name left">{{ match.p1Name }}</span>
+                <span class="name left" :style="nameStyle(match.p1Name)">{{ match.p1Name }}</span>
                 <span class="vs">vs</span>
-                <span class="name right">{{ match.p2Name }}</span>
+                <span class="name right" :style="nameStyle(match.p2Name)">{{ match.p2Name }}</span>
               </div>
             </div>
             <div v-else key="empty" class="muted">
@@ -368,6 +368,18 @@ function matchDisplayKey(match, p1Name = "", p2Name = "") {
   );
   if (!left && !right) return "";
   return `${left}::${right}`;
+}
+
+const NAME_FONT_MAX = 32;
+const NAME_FONT_MIN = 16;
+
+function nameStyle(name) {
+  const len = String(name || "").length;
+  // Scale down gently for longer names while keeping a readable floor.
+  let size = NAME_FONT_MAX - Math.max(0, len - 12) * 0.45;
+  if (len > 28) size -= (len - 28) * 0.25;
+  size = Math.max(NAME_FONT_MIN, Math.min(NAME_FONT_MAX, size));
+  return { fontSize: `${size}px` };
 }
 
 const routeTournamentId = computed(() => {
@@ -881,13 +893,15 @@ function tournamentLabel(tournament) {
 }
 .now-names {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.5fr);
+  justify-items: start;
   align-items: center;
-  gap: clamp(50px, 10vw, 140px);
-  width: min(1200px, 96%);
+  gap: clamp(12px, 5vw, 80px);
+  width: 100%;
+  max-width: 1200px;
   margin: 0 auto;
-  padding: 0 8%;
-  font-size: 34px;
+  padding: 0 1.5%;
+  font-size: clamp(20px, 3.8vw, 34px);
   font-weight: 800;
   letter-spacing: 0.02em;
   text-shadow: 0 10px 30px rgba(120, 200, 255, 0.35);
@@ -895,13 +909,15 @@ function tournamentLabel(tournament) {
 .now-names .name {
   padding: 8px 0;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 360px;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: normal;
+  max-width: 100%;
   justify-self: center;
+  line-height: 1.15;
 }
 .now-names .left { text-align: left; transform: translateY(-46px); }
-.now-names .right { text-align: right; transform: translateY(46px); }
+.now-names .right { text-align: left; justify-self: start; transform: translateY(46px); }
 .now-names .vs {
   font-size: 34px;
   font-weight: 900;
@@ -1144,9 +1160,9 @@ function tournamentLabel(tournament) {
   .top-stat.wide { grid-column: span 3; }
   .columns { grid-template-columns: 1fr; }
   .queue-eta { text-align: left; }
-  .now-names { font-size: 30px; gap: 34px; width: min(980px, 94%); }
-  .now-names .left { transform: translateY(-36px); }
-  .now-names .right { transform: translateY(36px); }
+  .now-names { font-size: clamp(18px, 3.6vw, 28px); gap: 28px; width: min(900px, 96%); padding: 0 5%; }
+  .now-names .left { transform: translateY(-28px); }
+  .now-names .right { transform: translateY(28px); }
   .now-names .vs { font-size: 24px; letter-spacing: 0.2em; }
 }
 
@@ -1156,11 +1172,36 @@ function tournamentLabel(tournament) {
   .picker { grid-template-columns: 1fr; }
   .queue-item { flex-direction: column; text-align: left; }
   .brand-text .title { font-size: 24px; }
-  .now-names { font-size: 24px; gap: 18px; width: min(820px, 94%); }
-  .now-names .left { transform: translateY(-26px); }
-  .now-names .right { transform: translateY(26px); }
+  .now-names { font-size: clamp(17px, 4.4vw, 24px); gap: 18px; width: min(760px, 96%); padding: 0 4%; }
+  .now-names .left { transform: translateY(-20px); }
+  .now-names .right { transform: translateY(20px); }
   .now-names .vs { font-size: 20px; letter-spacing: 0.18em; }
   .decision-toast { width: calc(100% - 40px); }
+}
+
+@media (max-width: 700px) {
+  .now-row { flex-direction: column; }
+  .now-card { min-height: 230px; }
+  .now-hero { align-items: flex-start; }
+  .now-names {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    width: 100%;
+    padding: 0 12px;
+    text-align: center;
+  }
+  .now-names .left,
+  .now-names .right {
+    transform: none;
+    text-align: center;
+  }
+  .now-names .vs {
+    order: 2;
+    justify-self: center;
+    font-size: 18px;
+    letter-spacing: 0.12em;
+    position: static;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
