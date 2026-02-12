@@ -59,54 +59,56 @@
     </header>
 
     <main class="content">
-      <div class="now-row" v-if="displayNowList.length">
+      <div v-if="hasTournament" class="now-container">
+        <div class="now-row" v-if="displayNowList.length">
+          <section
+            v-for="match in displayNowList"
+            :key="match.key"
+            class="card now-card"
+            :class="{
+              pulse: nowAdvancePulse,
+              decision: decisionHighlightId === match.sourceId,
+              pop: decisionPop && decisionHighlightId === match.sourceId
+            }"
+          >
+            <div class="now-head">
+              <div class="card-title">Now Up</div>
+            </div>
+            <div
+              v-if="swooshActive && decisionHighlightId === match.sourceId"
+              class="swoosh"
+              :class="swooshSide"
+              aria-hidden="true"
+            ></div>
+            <Transition name="now-swap" mode="out-in">
+              <div v-if="match" :key="match.key" class="now-hero">
+                <div class="now-names">
+                  <span class="name left" :style="nameStyle(match.p1Name)">{{ match.p1Name }}</span>
+                  <span class="vs">vs</span>
+                  <span class="name right" :style="nameStyle(match.p2Name)">{{ match.p2Name }}</span>
+                </div>
+              </div>
+              <div v-else key="empty" class="muted">
+                No ready matches yet. Waiting for two confirmed athletes.
+              </div>
+            </Transition>
+          </section>
+        </div>
         <section
-          v-for="match in displayNowList"
-          :key="match.key"
+          v-else
           class="card now-card"
-          :class="{
-            pulse: nowAdvancePulse,
-            decision: decisionHighlightId === match.sourceId,
-            pop: decisionPop && decisionHighlightId === match.sourceId
-          }"
+          :class="{ pulse: nowAdvancePulse, decision: recentDecision, pop: decisionPop }"
         >
           <div class="now-head">
             <div class="card-title">Now Up</div>
           </div>
-          <div
-            v-if="swooshActive && decisionHighlightId === match.sourceId"
-            class="swoosh"
-            :class="swooshSide"
-            aria-hidden="true"
-          ></div>
           <Transition name="now-swap" mode="out-in">
-            <div v-if="match" :key="match.key" class="now-hero">
-              <div class="now-names">
-                <span class="name left" :style="nameStyle(match.p1Name)">{{ match.p1Name }}</span>
-                <span class="vs">vs</span>
-                <span class="name right" :style="nameStyle(match.p2Name)">{{ match.p2Name }}</span>
-              </div>
-            </div>
-            <div v-else key="empty" class="muted">
+            <div key="empty" class="muted">
               No ready matches yet. Waiting for two confirmed athletes.
             </div>
           </Transition>
         </section>
       </div>
-      <section
-        v-else
-        class="card now-card"
-        :class="{ pulse: nowAdvancePulse, decision: recentDecision, pop: decisionPop }"
-      >
-        <div class="now-head">
-          <div class="card-title">Now Up</div>
-        </div>
-        <Transition name="now-swap" mode="out-in">
-          <div key="empty" class="muted">
-            No ready matches yet. Waiting for two confirmed athletes.
-          </div>
-        </Transition>
-      </section>
 
       <div v-if="hasTournament" class="columns">
         <section class="card brackets-card">
@@ -116,7 +118,7 @@
               v-for="bracket in visibleBrackets"
               :key="bracket.id"
               class="bracket-row"
-              :class="{ active: bracket.id === activeBracketId, ready: bracket.readyCount > 0 }"
+              :class="{ active: activeBracketIdsSet.has(bracket.id), ready: bracket.readyCount > 0 }"
             >
               <div class="bracket-main">
                 <div class="bracket-head">
@@ -125,7 +127,7 @@
                     <span class="pill" v-if="bracketHand(bracket.name)">
                       {{ bracketHand(bracket.name) }}
                     </span>
-                    <span class="pill active-pill" v-if="bracket.id === activeBracketId">Active</span>
+                    <span class="pill active-pill" v-if="activeBracketIdsSet.has(bracket.id)">Active</span>
                     <span class="badge">{{ bracket.progress }}%</span>
                   </div>
                 </div>
@@ -152,45 +154,55 @@
 
         <section class="card queue-card">
           <div class="card-title">Ready Queue</div>
-          <div class="queue" v-if="readyQueue.length">
-            <div v-if="hasQueueExtras">
-              <div class="queue-section" v-if="onDeckMatches.length">
+          <div class="queue" v-if="queueColumns.length">
+            <div
+              v-for="column in queueColumns"
+              :key="column.bracketId || column.bracketName"
+              class="queue-column"
+            >
+              <div class="queue-column-head">
+                <div class="queue-column-title">{{ column.bracketName }}</div>
+                <div class="queue-column-meta">
+                  <span class="pill" v-if="column.bracketLabel">{{ column.bracketLabel }}</span>
+                  <span class="pill active-pill" v-if="activeBracketIdsSet.has(column.bracketId)">Active</span>
+                  <span class="pill" v-if="column.matchCount">{{ column.matchCount }} ready</span>
+                </div>
+              </div>
+
+              <div class="queue-section" v-if="column.onDeck">
                 <div class="section-title">On Deck</div>
-                <TransitionGroup name="slide-up" tag="div" class="stack">
+                <div class="stack">
                   <div
-                    v-for="(m, index) in onDeckMatches"
-                    :key="`${m.bracketId}-${m.id}`"
-                    class="queue-item"
-                    :class="{ hot: index === 0 }"
-                    :style="{ '--i': index }"
+                    class="queue-item hot"
+                    :key="matchDisplayKey(column.onDeck, column.onDeck.p1Name, column.onDeck.p2Name)"
                   >
                     <div class="queue-main">
                       <div class="names">
-                        <span>{{ m.p1Name }}</span>
+                        <span>{{ column.onDeck.p1Name }}</span>
                         <span class="vs">vs</span>
-                        <span>{{ m.p2Name }}</span>
+                        <span>{{ column.onDeck.p2Name }}</span>
                       </div>
                       <div class="meta">
-                        <span class="pill">{{ m.bracketName }}</span>
-                        <span class="pill">{{ m.roundLabel }}</span>
-                        <span class="pill" v-if="m.bestOf">Bo{{ m.bestOf }}</span>
+                        <span class="pill">{{ column.onDeck.bracketName }}</span>
+                        <span class="pill">{{ column.onDeck.roundLabel }}</span>
+                        <span class="pill" v-if="column.onDeck.bestOf">Bo{{ column.onDeck.bestOf }}</span>
                       </div>
                     </div>
                     <div class="queue-eta">
                       <div class="small">ETA</div>
-                      <div class="big">{{ fmtDuration(m.etaSeconds) }}</div>
-                      <div class="small muted">~{{ fmtTimeFromNow(m.etaSeconds) }}</div>
+                      <div class="big">{{ fmtDuration(column.onDeck.etaSeconds) }}</div>
+                      <div class="small muted">~{{ fmtTimeFromNow(column.onDeck.etaSeconds) }}</div>
                     </div>
                   </div>
-                </TransitionGroup>
+                </div>
               </div>
 
-              <div class="queue-section" v-if="laterMatches.length">
+              <div class="queue-section" v-if="column.comingUp.length">
                 <div class="section-title">Coming Up</div>
                 <TransitionGroup name="fade-rise" tag="div" class="stack">
                   <div
-                    v-for="(m, index) in laterMatches"
-                    :key="`${m.bracketId}-${m.id}`"
+                    v-for="(m, index) in column.comingUp"
+                    :key="matchDisplayKey(m, m.p1Name, m.p2Name) || `${m.bracketId}-${m.id || index}`"
                     class="queue-item muted-row"
                     :style="{ '--i': index }"
                   >
@@ -215,7 +227,6 @@
                 </TransitionGroup>
               </div>
             </div>
-            <div v-else class="muted">No additional matches queued yet.</div>
           </div>
           <div class="muted" v-else>No ready matches yet. Waiting for two confirmed athletes.</div>
         </section>
@@ -433,8 +444,22 @@ const overallProgress = computed(() => {
 });
 
 const BRACKET_LIMIT = 10;
-const ON_DECK_COUNT = 2;
-const LATER_COUNT = 8;
+const QUEUE_COLUMN_LIMIT = 2;
+
+const recentActiveBrackets = ref([]);
+function touchRecentBracket(bracketId) {
+  if (!bracketId) return;
+  const next = recentActiveBrackets.value.filter((id) => id !== bracketId);
+  next.unshift(bracketId);
+  recentActiveBrackets.value = next.slice(0, 2);
+}
+
+const activeBracketIds = computed(() => {
+  const ids = [...recentActiveBrackets.value];
+  if (activeBracketId.value && !ids.includes(activeBracketId.value)) ids.push(activeBracketId.value);
+  return ids.slice(0, 2);
+});
+const activeBracketIdsSet = computed(() => new Set(activeBracketIds.value));
 
 const nowAdvancePulse = ref(false);
 const recentDecision = ref(null);
@@ -478,29 +503,56 @@ const displayNowList = computed(() => {
       };
     });
   }
-  const first = readyQueue.value[0];
-  if (first) {
-    const sourceId =
-      matchDisplayKey(first, first.p1Name, first.p2Name) ||
-      `${first.bracketId}-${first.id || "ready"}`;
-    return [
-      {
-        key: sourceId,
-        sourceId,
-        p1Name: first.p1Name,
-        p2Name: first.p2Name,
-      },
-    ];
+  
+  // Get the first ready match from each bracket, prioritizing active brackets
+  const bracketMatches = [];
+  const seenBracketIds = new Set();
+  
+  // First, try to get matches from sorted brackets (prioritizes active brackets)
+  for (const bracket of sortedBrackets.value) {
+    if (seenBracketIds.has(bracket.id)) continue;
+    if (bracket.nextReady) {
+      bracketMatches.push(bracket.nextReady);
+      seenBracketIds.add(bracket.id);
+      if (bracketMatches.length >= 2) break;
+    }
   }
-  return [];
+  
+  // If we still need matches, get from readyQueue (fallback)
+  if (bracketMatches.length === 0) {
+    const first = readyQueue.value[0];
+    if (first) {
+      bracketMatches.push(first);
+    }
+  } else if (bracketMatches.length === 1) {
+    // Try to get a second match from a different bracket
+    for (const match of readyQueue.value) {
+      if (match.bracketId !== bracketMatches[0].bracketId) {
+        bracketMatches.push(match);
+        break;
+      }
+    }
+  }
+  
+  return bracketMatches.map((match) => {
+    const sourceId =
+      matchDisplayKey(match, match.p1Name, match.p2Name) ||
+      `${match.bracketId}-${match.id || "ready"}`;
+    return {
+      key: sourceId,
+      sourceId,
+      p1Name: match.p1Name,
+      p2Name: match.p2Name,
+    };
+  });
 });
 
 const sortedBrackets = computed(() => {
   const list = bracketSummary.value.slice();
-  const activeId = activeBracketId.value;
+  const activeSet = activeBracketIdsSet.value;
   return list.sort((a, b) => {
-    const aActive = a.id === activeId;
-    const bActive = b.id === activeId;
+    const aActive = activeSet.has(a.id);
+    const bActive = activeSet.has(b.id);
     if (aActive && !bActive) return -1;
     if (bActive && !aActive) return 1;
     const aReady = a.readyCount > 0;
@@ -516,14 +568,46 @@ const hiddenBracketCount = computed(() =>
   Math.max(0, bracketSummary.value.length - visibleBrackets.value.length)
 );
 
+const queueColumns = computed(() => {
+  const groups = new Map();
+  for (const match of readyQueue.value) {
+    const bracketId = match.bracketId || match.bracket?.id || match.bracket_id || "unknown";
+    const bracketName = match.bracketName || match.bracket?.name || "Bracket";
+    if (!groups.has(bracketId)) {
+      groups.set(bracketId, {
+        bracketId,
+        bracketName,
+        bracketLabel: match.bracketLabel || "",
+        matches: [],
+      });
+    }
+    groups.get(bracketId).matches.push(match);
+  }
+
+  const ordered = [];
+  const priority = activeBracketIds.value;
+  for (const id of priority) {
+    const group = groups.get(id);
+    if (group) ordered.push(group);
+  }
+  for (const group of groups.values()) {
+    if (ordered.length >= QUEUE_COLUMN_LIMIT) break;
+    if (priority.includes(group.bracketId)) continue;
+    ordered.push(group);
+  }
+
+  return ordered.slice(0, QUEUE_COLUMN_LIMIT).map((group) => {
+    const [onDeck, ...comingUp] = group.matches;
+    return {
+      ...group,
+      onDeck,
+      comingUp,
+      matchCount: group.matches.length,
+    };
+  });
+});
+
 const nowMatch = computed(() => readyQueue.value[0] || null);
-const onDeckMatches = computed(() => readyQueue.value.slice(1, 1 + ON_DECK_COUNT));
-const laterMatches = computed(() =>
-  readyQueue.value.slice(1 + ON_DECK_COUNT, 1 + ON_DECK_COUNT + LATER_COUNT)
-);
-const hasQueueExtras = computed(
-  () => onDeckMatches.value.length > 0 || laterMatches.value.length > 0
-);
 
 watch(
   () => matchDisplayKey(nowMatch.value),
@@ -546,6 +630,9 @@ watch(
       (m) => m.done && !prevDoneIds.has(matchDisplayKey(m)) && !m.hasBye
     );
     if (!newlyDone.length) return;
+    for (const m of newlyDone.slice().reverse()) {
+      touchRecentBracket(m.bracketId);
+    }
     const decided = newlyDone[0];
     const decidedId = matchDisplayKey(decided);
     const winnerName = extractWinnerName(decided);
@@ -850,10 +937,15 @@ function tournamentLabel(tournament) {
   margin-bottom: 12px;
 }
 
+.now-container {
+  margin-bottom: 18px;
+  width: 100%;
+}
 .now-row {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
+  width: 100%;
 }
 .now-card {
   background: radial-gradient(1200px 400px at 10% -20%, rgba(120, 180, 255, 0.25), transparent 60%),
@@ -863,6 +955,9 @@ function tournamentLabel(tournament) {
   display: flex;
   flex-direction: column;
   justify-content: center;
+}
+.now-container > .now-card {
+  width: 100%;
 }
 .now-card.pulse::after {
   content: "";
@@ -973,9 +1068,21 @@ function tournamentLabel(tournament) {
 }
 .toast-result .loser { opacity: 0.6; }
 
-.columns { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); gap: 18px; align-items: start; }
+.columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 18px; align-items: stretch; }
+.brackets-card,
+.queue-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
 
-.brackets { display: grid; gap: 12px; }
+.brackets {
+  display: grid;
+  gap: 12px;
+  flex: 1;
+  overflow: auto;
+  padding-right: 4px;
+}
 .bracket-row {
   padding: 14px 14px 16px;
   border-radius: 18px;
@@ -1018,7 +1125,19 @@ function tournamentLabel(tournament) {
 }
 .bracket-next { font-size: 12px; margin-top: 10px; opacity: 0.8; }
 
-.queue { display: flex; flex-direction: column; gap: 16px; }
+.queue {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+  flex: 1;
+  overflow: auto;
+  padding-right: 4px;
+}
+.queue-column { display: flex; flex-direction: column; gap: 12px; height: 100%; }
+.queue-column-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.queue-column-title { font-weight: 700; font-size: 15px; }
+.queue-column-meta { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }
 .queue-section { display: flex; flex-direction: column; gap: 8px; }
 .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.18em; opacity: 0.7; }
 .queue-item {
@@ -1159,6 +1278,7 @@ function tournamentLabel(tournament) {
   .topbar-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .top-stat.wide { grid-column: span 3; }
   .columns { grid-template-columns: 1fr; }
+  .queue { grid-template-columns: 1fr; }
   .queue-eta { text-align: left; }
   .now-names { font-size: clamp(18px, 3.6vw, 28px); gap: 28px; width: min(900px, 96%); padding: 0 5%; }
   .now-names .left { transform: translateY(-28px); }
