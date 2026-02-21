@@ -173,126 +173,138 @@
             </div>
           </div>
 
-          <div class="queue" v-if="queueViewMode === VIEW_QUEUE && queueColumns.length">
+          <Transition name="queue-switch" mode="out-in" :duration="{ enter: 1000, leave: 1000 }">
             <div
-              v-for="column in queueColumns"
-              :key="column.bracketId || column.bracketName"
-              class="queue-column"
+              class="queue"
+              v-if="queueViewMode === VIEW_QUEUE && queueColumns.length"
+              key="queue-view"
             >
-              <div class="queue-column-head">
-                <div class="queue-column-title">{{ column.bracketName }}</div>
-                <div class="queue-column-meta">
-                  <span class="pill" v-if="column.bracketLabel">{{ column.bracketLabel }}</span>
-                  <span class="pill active-pill" v-if="activeBracketIdsSet.has(column.bracketId)">Active</span>
-                  <span class="pill" v-if="column.matchCount">{{ column.matchCount }} ready</span>
+              <div
+                v-for="column in queueColumns"
+                :key="column.bracketId || column.bracketName"
+                class="queue-column"
+              >
+                <div class="queue-column-head">
+                  <div class="queue-column-title">{{ column.bracketName }}</div>
+                  <div class="queue-column-meta">
+                    <span class="pill" v-if="column.bracketLabel">{{ column.bracketLabel }}</span>
+                    <span class="pill active-pill" v-if="activeBracketIdsSet.has(column.bracketId)">Active</span>
+                    <span class="pill" v-if="column.matchCount">{{ column.matchCount }} ready</span>
+                  </div>
                 </div>
-              </div>
 
-              <div class="queue-section" v-if="column.onDeck">
-                <div class="section-title">On Deck</div>
-                <div class="stack">
-                  <div
-                    class="queue-item hot"
-                    :key="matchDisplayKey(column.onDeck, column.onDeck.p1Name, column.onDeck.p2Name)"
-                  >
-                    <div class="queue-main">
-                      <div class="names">
-                        <span>{{ column.onDeck.p1Name }}</span>
-                        <span class="vs">vs</span>
-                        <span>{{ column.onDeck.p2Name }}</span>
+                <div class="queue-section" v-if="column.onDeck">
+                  <div class="section-title">On Deck</div>
+                  <div class="stack">
+                    <div
+                      class="queue-item hot"
+                      :key="matchDisplayKey(column.onDeck, column.onDeck.p1Name, column.onDeck.p2Name)"
+                    >
+                      <div class="queue-main">
+                        <div class="names">
+                          <span>{{ column.onDeck.p1Name }}</span>
+                          <span class="vs">vs</span>
+                          <span>{{ column.onDeck.p2Name }}</span>
+                        </div>
+                        <div class="meta">
+                          <span class="pill">{{ column.onDeck.bracketName }}</span>
+                          <span class="pill">{{ column.onDeck.roundLabel }}</span>
+                          <span class="pill" v-if="column.onDeck.bestOf">Bo{{ column.onDeck.bestOf }}</span>
+                        </div>
                       </div>
-                      <div class="meta">
-                        <span class="pill">{{ column.onDeck.bracketName }}</span>
-                        <span class="pill">{{ column.onDeck.roundLabel }}</span>
-                        <span class="pill" v-if="column.onDeck.bestOf">Bo{{ column.onDeck.bestOf }}</span>
+                      <div class="queue-eta">
+                        <div class="small">ETA</div>
+                        <div class="big">{{ fmtDuration(column.onDeck.etaSeconds) }}</div>
+                        <div class="small muted">~{{ fmtTimeFromNow(column.onDeck.etaSeconds) }}</div>
                       </div>
-                    </div>
-                    <div class="queue-eta">
-                      <div class="small">ETA</div>
-                      <div class="big">{{ fmtDuration(column.onDeck.etaSeconds) }}</div>
-                      <div class="small muted">~{{ fmtTimeFromNow(column.onDeck.etaSeconds) }}</div>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <div class="queue-section" v-if="column.comingUp.length">
-                <div class="section-title">Coming Up</div>
-                <TransitionGroup name="fade-rise" tag="div" class="stack">
-                  <div
-                    v-for="(m, index) in column.comingUp"
-                    :key="matchDisplayKey(m, m.p1Name, m.p2Name) || `${m.bracketId}-${m.id || index}`"
-                    class="queue-item muted-row"
-                    :style="{ '--i': index }"
-                  >
-                    <div class="queue-main">
-                      <div class="names">
-                        <span>{{ m.p1Name }}</span>
-                        <span class="vs">vs</span>
-                        <span>{{ m.p2Name }}</span>
+                <div class="queue-section" v-if="column.comingUp.length">
+                  <div class="section-title">Coming Up</div>
+                  <TransitionGroup name="fade-rise" tag="div" class="stack">
+                    <div
+                      v-for="(m, index) in column.comingUp"
+                      :key="matchDisplayKey(m, m.p1Name, m.p2Name) || `${m.bracketId}-${m.id || index}`"
+                      class="queue-item muted-row"
+                      :style="{ '--i': index }"
+                    >
+                      <div class="queue-main">
+                        <div class="names">
+                          <span>{{ m.p1Name }}</span>
+                          <span class="vs">vs</span>
+                          <span>{{ m.p2Name }}</span>
+                        </div>
+                        <div class="meta">
+                          <span class="pill">{{ m.bracketName }}</span>
+                          <span class="pill">{{ m.roundLabel }}</span>
+                          <span class="pill" v-if="m.bestOf">Bo{{ m.bestOf }}</span>
+                        </div>
                       </div>
-                      <div class="meta">
-                        <span class="pill">{{ m.bracketName }}</span>
-                        <span class="pill">{{ m.roundLabel }}</span>
-                        <span class="pill" v-if="m.bestOf">Bo{{ m.bestOf }}</span>
+                      <div class="queue-eta">
+                        <div class="small">ETA</div>
+                        <div class="big">{{ fmtDuration(m.etaSeconds) }}</div>
+                        <div class="small muted">~{{ fmtTimeFromNow(m.etaSeconds) }}</div>
                       </div>
                     </div>
-                    <div class="queue-eta">
-                      <div class="small">ETA</div>
-                      <div class="big">{{ fmtDuration(m.etaSeconds) }}</div>
-                      <div class="small muted">~{{ fmtTimeFromNow(m.etaSeconds) }}</div>
-                    </div>
-                  </div>
-                </TransitionGroup>
+                  </TransitionGroup>
+                </div>
               </div>
             </div>
-          </div>
-          <div class="muted" v-else-if="queueViewMode === VIEW_QUEUE">
-            No ready matches yet. Waiting for two confirmed athletes.
-          </div>
+            <div class="muted" v-else-if="queueViewMode === VIEW_QUEUE" key="queue-empty">
+              No ready matches yet. Waiting for two confirmed athletes.
+            </div>
 
-          <div class="queue" v-else-if="queueViewMode === VIEW_STANDINGS && standingsColumns.length">
             <div
-              v-for="column in standingsColumns"
-              :key="column.bracketId || column.bracketName"
-              class="queue-column"
+              class="queue"
+              v-else-if="queueViewMode === VIEW_STANDINGS && standingsColumns.length"
+              key="rankings-view"
             >
-              <div class="queue-column-head">
-                <div class="queue-column-title">{{ column.bracketName }}</div>
-                <div class="queue-column-meta">
-                  <span class="pill" v-if="column.bracketLabel">{{ column.bracketLabel }}</span>
-                  <span class="pill active-pill" v-if="activeBracketIdsSet.has(column.bracketId)">Active</span>
+              <div
+                v-for="column in standingsColumns"
+                :key="column.bracketId || column.bracketName"
+                class="queue-column"
+              >
+                <div class="queue-column-head">
+                  <div class="queue-column-title">{{ column.bracketName }}</div>
+                  <div class="queue-column-meta">
+                    <span class="pill" v-if="column.bracketLabel">{{ column.bracketLabel }}</span>
+                    <span class="pill active-pill" v-if="activeBracketIdsSet.has(column.bracketId)">Active</span>
+                  </div>
                 </div>
-              </div>
 
-              <div class="queue-section">
-                <div class="section-title">Rankings · Win / Loss</div>
-                <div class="stack standings-stack" v-if="column.leaders.length">
-                  <div
-                    v-for="leader in column.leaders"
-                    :key="`${column.bracketId}-${leader.key}`"
-                    class="queue-item standings-item"
-                  >
-                    <div class="queue-main">
-                      <div class="names standings-names">
-                        <span class="pill place-pill">{{ leader.placeLabel }}</span>
-                        <span class="athlete-name">{{ leader.name }}</span>
-                      </div>
-                      <div class="meta">
-                        <span class="pill record-pill">{{ leader.recordLabel }}</span>
+                <div class="queue-section">
+                  <div class="section-title">Rankings · Win / Loss</div>
+                  <div class="stack standings-stack" v-if="column.leaders.length">
+                    <div
+                      v-for="leader in column.leaders"
+                      :key="`${column.bracketId}-${leader.key}`"
+                      class="queue-item standings-item"
+                    >
+                      <div class="queue-main">
+                        <div class="names standings-names">
+                          <span class="pill place-pill">{{ leader.placeLabel }}</span>
+                          <span class="athlete-name">{{ leader.name }}</span>
+                        </div>
+                        <div class="meta">
+                          <span class="pill record-pill">{{ leader.recordLabel }}</span>
+                        </div>
                       </div>
                     </div>
                   </div>
+                  <div class="muted" v-else>No decided matches yet.</div>
                 </div>
-                <div class="muted" v-else>No decided matches yet.</div>
               </div>
             </div>
-          </div>
 
-          <div class="muted" v-else-if="queueViewMode === VIEW_STANDINGS">
-            No results yet. Win/loss records appear after matches finish.
-          </div>
-          <div class="muted" v-else>No ready matches yet. Waiting for two confirmed athletes.</div>
+            <div class="muted" v-else-if="queueViewMode === VIEW_STANDINGS" key="rankings-empty">
+              No results yet. Win/loss records appear after matches finish.
+            </div>
+            <div class="muted" v-else key="queue-default">
+              No ready matches yet. Waiting for two confirmed athletes.
+            </div>
+          </Transition>
         </section>
       </div>
 
@@ -368,7 +380,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useTournament } from "./tournament/useTournament";
 
@@ -542,6 +554,7 @@ const VIEW_STANDINGS = "standings";
 const PLACE_LIMIT = 5;
 
 const queueViewMode = ref(VIEW_QUEUE);
+let queueToggleTimer = null;
 
 const recentActiveBrackets = ref([]);
 function touchRecentBracket(bracketId) {
@@ -878,6 +891,18 @@ const standingsColumns = computed(() =>
     };
   })
 );
+
+function toggleQueueView() {
+  queueViewMode.value = queueViewMode.value === VIEW_QUEUE ? VIEW_STANDINGS : VIEW_QUEUE;
+}
+
+onMounted(() => {
+  queueToggleTimer = window.setInterval(toggleQueueView, 8000);
+});
+
+onBeforeUnmount(() => {
+  if (queueToggleTimer) window.clearInterval(queueToggleTimer);
+});
 
 const nowMatch = computed(() => readyQueue.value[0] || null);
 
@@ -1489,6 +1514,15 @@ function tournamentLabel(tournament) {
 }
 .active-pill { background: rgba(60, 220, 150, 0.15); color: #7dffcf; }
 .queue-eta { min-width: 140px; text-align: right; }
+.queue-switch-enter-active,
+.queue-switch-leave-active {
+  transition: opacity 1s ease, transform 1s ease;
+}
+.queue-switch-enter-from,
+.queue-switch-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
+}
 .standings-stack { grid-auto-rows: 1fr; }
 .standings-item { align-items: center; }
 .standings-names {
