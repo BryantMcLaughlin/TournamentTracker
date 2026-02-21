@@ -443,7 +443,7 @@ const overallProgress = computed(() => {
   return Math.round((stats.value.doneCount / stats.value.totalMatches) * 100);
 });
 
-const BRACKET_LIMIT = 10;
+const BRACKET_LIMIT = 6;
 const QUEUE_COLUMN_LIMIT = 2;
 
 const recentActiveBrackets = ref([]);
@@ -476,75 +476,127 @@ let decisionPopTimer = null;
 const currentMatches = computed(() => payload.value?.current_matches || []);
 
 const displayNowList = computed(() => {
+  const normalizeMatch = (m, index = 0, prefix = "current") => {
+    const p1Name =
+      m.p1Name ||
+      m.p1?.name ||
+      m.p1 ||
+      m.athletes?.a ||
+      m.a ||
+      (typeof m === "string" ? m : "") ||
+      "TBD";
+    const p2Name =
+      m.p2Name ||
+      m.p2?.name ||
+      m.p2 ||
+      m.athletes?.b ||
+      m.b ||
+      (typeof m === "string" ? m : "") ||
+      "TBD";
+    const bracketId =
+      m.bracketId ||
+      m.bracket_id ||
+      m.bracket?.id ||
+      m.bracket?.bracket_id ||
+      m.bracket?.bracketId ||
+      m.bracketName ||
+      m.bracket?.name ||
+      m.bracket_label ||
+      m.bracket?.label ||
+      `unknown-${prefix}-${index}`;
+    const bracketKey = String(bracketId);
+    const sourceId = matchDisplayKey(m, p1Name, p2Name) || `${prefix}-${index}`;
+    return {
+      key: sourceId,
+      sourceId,
+      bracketId: bracketKey,
+      p1Name,
+      p2Name,
+    };
+  };
+
+  // If we have current matches, show up to one per bracket (favor active brackets)
   if (currentMatches.value.length) {
-    return currentMatches.value.map((m, index) => {
-      const p1Name =
-        m.p1Name ||
-        m.p1?.name ||
-        m.p1 ||
-        m.athletes?.a ||
-        m.a ||
-        (typeof m === "string" ? m : "") ||
-        "TBD";
-      const p2Name =
-        m.p2Name ||
-        m.p2?.name ||
-        m.p2 ||
-        m.athletes?.b ||
-        m.b ||
-        (typeof m === "string" ? m : "") ||
-        "TBD";
-      const sourceId = matchDisplayKey(m, p1Name, p2Name) || `current-${index}`;
-      return {
-        key: sourceId,
+    const normalized = currentMatches.value.map((m, index) => normalizeMatch(m, index, "current"));
+    const ordered = [];
+    const used = new Set();
+    const activeKeys = activeBracketIds.value.map((id) => String(id));
+
+    for (const key of activeKeys) {
+      const found = normalized.find((m) => m.bracketId === key && !used.has(m.bracketId));
+      if (found) {
+        used.add(found.bracketId);
+        ordered.push(found);
+      }
+      if (ordered.length >= 2) break;
+    }
+
+    if (ordered.length < 2) {
+      for (const match of normalized) {
+        if (used.has(match.bracketId)) continue;
+        used.add(match.bracketId);
+        ordered.push(match);
+        if (ordered.length >= 2) break;
+      }
+    }
+
+    if (ordered.length) {
+      return ordered.slice(0, 2).map(({ key, sourceId, p1Name, p2Name }) => ({
+        key,
         sourceId,
         p1Name,
         p2Name,
-      };
-    });
+      }));
+    }
   }
   
   // Get the first ready match from each bracket, prioritizing active brackets
   const bracketMatches = [];
   const seenBracketIds = new Set();
+  const activeKeys = activeBracketIds.value.map((id) => String(id));
+  const summaryList = Array.isArray(bracketSummary.value) ? bracketSummary.value : [];
+  const addMatch = (m, index = 0) => {
+    if (!m) return;
+    const norm = normalizeMatch(m, index, "fallback");
+    if (seenBracketIds.has(norm.bracketId)) return;
+    seenBracketIds.add(norm.bracketId);
+    bracketMatches.push(norm);
+  };
   
   // First, try to get matches from sorted brackets (prioritizes active brackets)
-  for (const bracket of sortedBrackets.value) {
-    if (seenBracketIds.has(bracket.id)) continue;
-    if (bracket.nextReady) {
-      bracketMatches.push(bracket.nextReady);
-      seenBracketIds.add(bracket.id);
-      if (bracketMatches.length >= 2) break;
-    }
+  for (const bracket of sortedBrackets.value || summaryList) {
+    const id = String(bracket.id);
+    if (bracket.nextReady) addMatch({ ...bracket.nextReady, bracketId: id }, bracketMatches.length);
+    if (bracketMatches.length >= 2) break;
   }
   
   // If we still need matches, get from readyQueue (fallback)
   if (bracketMatches.length === 0) {
     const first = readyQueue.value[0];
-    if (first) {
-      bracketMatches.push(first);
-    }
+    if (first) addMatch(first, 0);
   } else if (bracketMatches.length === 1) {
     // Try to get a second match from a different bracket
     for (const match of readyQueue.value) {
-      if (match.bracketId !== bracketMatches[0].bracketId) {
-        bracketMatches.push(match);
+      const norm = normalizeMatch(match, 1, "ready");
+      if (norm.bracketId !== bracketMatches[0].bracketId) {
+        addMatch(match, 1);
         break;
       }
     }
   }
   
-  return bracketMatches.map((match) => {
-    const sourceId =
+  return bracketMatches.slice(0, 2).map((match, index) => ({
+    key:
+      match.key ||
       matchDisplayKey(match, match.p1Name, match.p2Name) ||
-      `${match.bracketId}-${match.id || "ready"}`;
-    return {
-      key: sourceId,
-      sourceId,
-      p1Name: match.p1Name,
-      p2Name: match.p2Name,
-    };
-  });
+      `${match.bracketId}-${match.id || match.sourceId || `ready-${index}`}`,
+    sourceId:
+      match.sourceId ||
+      matchDisplayKey(match, match.p1Name, match.p2Name) ||
+      `${match.bracketId}-${match.id || match.key || `ready-${index}`}`,
+    p1Name: match.p1Name,
+    p2Name: match.p2Name,
+  }));
 });
 
 const sortedBrackets = computed(() => {
@@ -746,6 +798,11 @@ function tournamentLabel(tournament) {
 </script>
 
 <style scoped>
+:global(:root) {
+  --panel-max-height: clamp(320px, 48vh, 520px);
+  --panel-content-offset: 86px;
+}
+
 .app {
   min-height: 100vh;
   display: flex;
@@ -1071,7 +1128,8 @@ function tournamentLabel(tournament) {
 .columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 18px; align-items: stretch; }
 .brackets-card,
 .queue-card {
-  height: 100%;
+  height: auto;
+  max-height: var(--panel-max-height);
   display: flex;
   flex-direction: column;
 }
@@ -1082,14 +1140,16 @@ function tournamentLabel(tournament) {
   flex: 1;
   overflow: auto;
   padding-right: 4px;
+  max-height: calc(var(--panel-max-height) - var(--panel-content-offset));
 }
 .bracket-row {
-  padding: 14px 14px 16px;
+  padding: 16px 16px 20px;
   border-radius: 18px;
   background: rgba(10, 14, 24, 0.75);
   position: relative;
   overflow: hidden;
   box-shadow: 0 20px 36px rgba(0, 0, 0, 0.35);
+  min-height: 120px;
 }
 .bracket-row::before {
   content: "";
@@ -1133,6 +1193,7 @@ function tournamentLabel(tournament) {
   flex: 1;
   overflow: auto;
   padding-right: 4px;
+  max-height: calc(var(--panel-max-height) - var(--panel-content-offset));
 }
 .queue-column { display: flex; flex-direction: column; gap: 12px; height: 100%; }
 .queue-column-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
