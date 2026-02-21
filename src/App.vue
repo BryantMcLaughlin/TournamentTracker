@@ -625,6 +625,27 @@ const displayNowList = computed(() => {
     };
   };
 
+  // Prefer showing the same matches as the Ready Queue "On Deck" slots
+  const onDeckMatches = (queueColumns.value || [])
+    .map((col) => col.onDeck)
+    .filter(Boolean);
+
+  if (onDeckMatches.length) {
+    const normalized = onDeckMatches.map((m, index) => normalizeMatch(m, index, "onDeck"));
+    return normalized.slice(0, 2).map((match, index) => ({
+      key:
+        match.key ||
+        matchDisplayKey(match, match.p1Name, match.p2Name) ||
+        `${match.bracketId}-${match.id || match.sourceId || `onDeck-${index}`}`,
+      sourceId:
+        match.sourceId ||
+        matchDisplayKey(match, match.p1Name, match.p2Name) ||
+        `${match.bracketId}-${match.id || match.key || `onDeck-${index}`}`,
+      p1Name: match.p1Name,
+      p2Name: match.p2Name,
+    }));
+  }
+
   // If we have current matches, show up to one per bracket (favor active brackets)
   if (currentMatches.value.length) {
     const normalized = currentMatches.value.map((m, index) => normalizeMatch(m, index, "current"));
