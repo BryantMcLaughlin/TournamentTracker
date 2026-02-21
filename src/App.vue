@@ -153,8 +153,27 @@
         </section>
 
         <section class="card queue-card">
-          <div class="card-title">Ready Queue</div>
-          <div class="queue" v-if="queueColumns.length">
+          <div class="card-header">
+            <div class="card-title">Bracket Tracking</div>
+            <div class="queue-toggle">
+              <button
+                class="toggle-btn"
+                :class="{ active: queueViewMode === VIEW_QUEUE }"
+                @click="queueViewMode = VIEW_QUEUE"
+              >
+                Ready Queue
+              </button>
+              <button
+                class="toggle-btn"
+                :class="{ active: queueViewMode === VIEW_STANDINGS }"
+                @click="queueViewMode = VIEW_STANDINGS"
+              >
+                Rankings
+              </button>
+            </div>
+          </div>
+
+          <div class="queue" v-if="queueViewMode === VIEW_QUEUE && queueColumns.length">
             <div
               v-for="column in queueColumns"
               :key="column.bracketId || column.bracketName"
@@ -227,6 +246,51 @@
                 </TransitionGroup>
               </div>
             </div>
+          </div>
+          <div class="muted" v-else-if="queueViewMode === VIEW_QUEUE">
+            No ready matches yet. Waiting for two confirmed athletes.
+          </div>
+
+          <div class="queue" v-else-if="queueViewMode === VIEW_STANDINGS && standingsColumns.length">
+            <div
+              v-for="column in standingsColumns"
+              :key="column.bracketId || column.bracketName"
+              class="queue-column"
+            >
+              <div class="queue-column-head">
+                <div class="queue-column-title">{{ column.bracketName }}</div>
+                <div class="queue-column-meta">
+                  <span class="pill" v-if="column.bracketLabel">{{ column.bracketLabel }}</span>
+                  <span class="pill active-pill" v-if="activeBracketIdsSet.has(column.bracketId)">Active</span>
+                </div>
+              </div>
+
+              <div class="queue-section">
+                <div class="section-title">Rankings · Win / Loss</div>
+                <div class="stack standings-stack" v-if="column.leaders.length">
+                  <div
+                    v-for="leader in column.leaders"
+                    :key="`${column.bracketId}-${leader.key}`"
+                    class="queue-item standings-item"
+                  >
+                    <div class="queue-main">
+                      <div class="names standings-names">
+                        <span class="pill place-pill">{{ leader.placeLabel }}</span>
+                        <span class="athlete-name">{{ leader.name }}</span>
+                      </div>
+                      <div class="meta">
+                        <span class="pill record-pill">{{ leader.recordLabel }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="muted" v-else>No decided matches yet.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="muted" v-else-if="queueViewMode === VIEW_STANDINGS">
+            No results yet. Win/loss records appear after matches finish.
           </div>
           <div class="muted" v-else>No ready matches yet. Waiting for two confirmed athletes.</div>
         </section>
@@ -381,6 +445,34 @@ function matchDisplayKey(match, p1Name = "", p2Name = "") {
   return `${left}::${right}`;
 }
 
+function athleteIdentifiers(athlete) {
+  if (!athlete) return [];
+  const ids = [
+    athlete.id,
+    athlete.athlete_id,
+    athlete.athleteId,
+    athlete.athlete?.id,
+  ].filter((value) => value !== undefined && value !== null && value !== "");
+  return ids.map((id) => String(id));
+}
+
+function athleteDisplayName(athlete, fallback = "TBD") {
+  if (!athlete) return fallback;
+  if (athlete.name) return athlete.name;
+  if (typeof athlete === "string") return athlete;
+  return fallback;
+}
+
+function ordinalLabel(index) {
+  const n = index + 1;
+  if (n === 1) return "1st Place";
+  if (n === 2) return "2nd Place";
+  if (n === 3) return "3rd Place";
+  if (n === 4) return "4th Place";
+  if (n === 5) return "5th Place";
+  return `${n}th Place`;
+}
+
 const NAME_FONT_MAX = 32;
 const NAME_FONT_MIN = 16;
 
@@ -445,6 +537,11 @@ const overallProgress = computed(() => {
 
 const BRACKET_LIMIT = 6;
 const QUEUE_COLUMN_LIMIT = 2;
+const VIEW_QUEUE = "queue";
+const VIEW_STANDINGS = "standings";
+const PLACE_LIMIT = 5;
+
+const queueViewMode = ref(VIEW_QUEUE);
 
 const recentActiveBrackets = ref([]);
 function touchRecentBracket(bracketId) {
@@ -658,6 +755,129 @@ const queueColumns = computed(() => {
     };
   });
 });
+
+const bracketRecordsMap = computed(() => {
+  const map = new Map();
+
+  const ensureBracketEntry = (bracketId, bracketName = "Bracket", bracketLabel = "") => {
+    const key = String(bracketId || "unknown");
+    if (!map.has(key)) {
+      map.set(key, {
+        bracketId: key,
+        bracketName,
+        bracketLabel,
+        athletes: new Map(),
+      });
+    } else {
+      const entry = map.get(key);
+      if (bracketName && entry.bracketName !== bracketName) entry.bracketName = bracketName;
+      if (bracketLabel && !entry.bracketLabel) entry.bracketLabel = bracketLabel;
+    }
+    return map.get(key);
+  };
+
+  (payload.value?.brackets || []).forEach((bracket, index) => {
+    const bracketId = bracket.id || `${index}`;
+    const bracketName = bracket.name || `Bracket ${index + 1}`;
+    const bracketLabel =
+      bracket.bracket_label || bracket.bracketLabel || bracket.bracket || bracket.label || "";
+    const entry = ensureBracketEntry(bracketId, bracketName, bracketLabel);
+    (bracket.athletes || []).forEach((athlete, athleteIndex) => {
+      const name = athleteDisplayName(athlete, `Athlete ${athleteIndex + 1}`);
+      const key = athleteIdentifiers(athlete)[0] || normalizeName(name);
+      if (!key) return;
+      if (!entry.athletes.has(key)) {
+        entry.athletes.set(key, { key, name, wins: 0, losses: 0 });
+      }
+    });
+  });
+
+  matches.value.forEach((match, index) => {
+    if (!match || match.hasBye || !match.done) return;
+    const bracketId = match.bracketId || match.bracket?.id || match.bracket_id || "unknown";
+    const bracketName = match.bracketName || match.bracket?.name || "Bracket";
+    const bracketLabel = match.bracketLabel || "";
+    const entry = ensureBracketEntry(bracketId, bracketName, bracketLabel);
+
+    const winnerName = extractWinnerName(match);
+    const winnerId = match.winner_id ?? match.winnerId ?? match.winner?.id ?? null;
+
+    const p1Ids = athleteIdentifiers(match.p1);
+    const p2Ids = athleteIdentifiers(match.p2);
+    const p1Name = athleteDisplayName(match.p1, match.p1Name || "TBD");
+    const p2Name = athleteDisplayName(match.p2, match.p2Name || "TBD");
+
+    const p1 = {
+      key: p1Ids[0] || normalizeName(p1Name) || `p1-${bracketId}-${index}`,
+      name: p1Name,
+      ids: p1Ids,
+    };
+    const p2 = {
+      key: p2Ids[0] || normalizeName(p2Name) || `p2-${bracketId}-${index}`,
+      name: p2Name,
+      ids: p2Ids,
+    };
+
+    const ensureAthleteRecord = (athlete) => {
+      if (!athlete?.key) return null;
+      if (!entry.athletes.has(athlete.key)) {
+        entry.athletes.set(athlete.key, { key: athlete.key, name: athlete.name || "TBD", wins: 0, losses: 0 });
+      } else if (athlete.name && entry.athletes.get(athlete.key).name === "TBD") {
+        entry.athletes.get(athlete.key).name = athlete.name;
+      }
+      return entry.athletes.get(athlete.key);
+    };
+
+    const normalizedWinnerName = normalizeName(winnerName);
+    let winner = null;
+    if (winnerId != null) {
+      const winnerIdStr = String(winnerId);
+      if (p1.ids.includes(winnerIdStr)) winner = p1;
+      else if (p2.ids.includes(winnerIdStr)) winner = p2;
+    }
+    if (!winner && normalizedWinnerName) {
+      if (normalizedWinnerName === normalizeName(p1.name)) winner = p1;
+      else if (normalizedWinnerName === normalizeName(p2.name)) winner = p2;
+    }
+    if (!winner) return;
+    const loser = winner === p1 ? p2 : p1;
+    const winnerRecord = ensureAthleteRecord(winner);
+    const loserRecord = ensureAthleteRecord(loser);
+    if (!winnerRecord || !loserRecord) return;
+    winnerRecord.wins += 1;
+    loserRecord.losses += 1;
+  });
+
+  const result = new Map();
+  map.forEach((entry, bracketId) => {
+    const leaders = Array.from(entry.athletes.values())
+      .filter((athlete) => athlete.wins + athlete.losses > 0)
+      .sort((a, b) => {
+        if (b.wins !== a.wins) return b.wins - a.wins;
+        if (a.losses !== b.losses) return a.losses - b.losses;
+        return a.name.localeCompare(b.name);
+      })
+      .slice(0, PLACE_LIMIT)
+      .map((athlete, index) => ({
+        ...athlete,
+        placeLabel: ordinalLabel(index),
+        recordLabel: `${athlete.wins} - ${athlete.losses}`,
+      }));
+    result.set(String(bracketId), { ...entry, leaders });
+  });
+
+  return result;
+});
+
+const standingsColumns = computed(() =>
+  queueColumns.value.map((column) => {
+    const record = bracketRecordsMap.value.get(String(column.bracketId));
+    return {
+      ...column,
+      leaders: record?.leaders || [],
+    };
+  })
+);
 
 const nowMatch = computed(() => readyQueue.value[0] || null);
 
@@ -1133,6 +1353,38 @@ function tournamentLabel(tournament) {
   display: flex;
   flex-direction: column;
 }
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.queue-toggle {
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+.toggle-btn {
+  border: none;
+  background: transparent;
+  color: #cfe7ff;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.toggle-btn.active {
+  background: linear-gradient(120deg, rgba(120, 200, 255, 0.35), rgba(120, 255, 210, 0.3));
+  color: #ffffff;
+  box-shadow: 0 8px 18px rgba(120, 200, 255, 0.25);
+}
 
 .brackets {
   display: grid;
@@ -1237,6 +1489,22 @@ function tournamentLabel(tournament) {
 }
 .active-pill { background: rgba(60, 220, 150, 0.15); color: #7dffcf; }
 .queue-eta { min-width: 140px; text-align: right; }
+.standings-stack { grid-auto-rows: 1fr; }
+.standings-item { align-items: center; }
+.standings-names {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.place-pill {
+  background: rgba(120, 200, 255, 0.14);
+  font-weight: 800;
+}
+.record-pill {
+  background: rgba(255, 255, 255, 0.12);
+  font-weight: 700;
+}
 .small { font-size: 11px; opacity: 0.75; }
 .big { font-size: 18px; font-weight: 800; margin-top: 4px; }
 .muted { opacity: 0.65; }
