@@ -60,39 +60,17 @@
 
     <main class="content">
       <div v-if="hasTournament" class="now-container">
-        <div class="now-row" v-if="displayNowList.length">
-          <section
-            v-for="match in displayNowList"
+        <div class="now-row" v-if="display_now_cards.length">
+          <NowUpCard
+            v-for="match in display_now_cards"
             :key="match.key"
-            class="card now-card"
-            :class="{
-              pulse: nowAdvancePulse,
-              decision: decisionHighlightId === match.sourceId,
-              pop: decisionPop && decisionHighlightId === match.sourceId
-            }"
-          >
-            <div class="now-head">
-              <div class="card-title">Now Up</div>
-            </div>
-            <div
-              v-if="swooshActive && decisionHighlightId === match.sourceId"
-              class="swoosh"
-              :class="swooshSide"
-              aria-hidden="true"
-            ></div>
-            <Transition name="now-swap" mode="out-in">
-              <div v-if="match" :key="match.key" class="now-hero">
-                <div class="now-names">
-                  <span class="name left" :style="nameStyle(match.p1Name)">{{ match.p1Name }}</span>
-                  <span class="vs">vs</span>
-                  <span class="name right" :style="nameStyle(match.p2Name)">{{ match.p2Name }}</span>
-                </div>
-              </div>
-              <div v-else key="empty" class="muted">
-                No ready matches yet. Waiting for two confirmed athletes.
-              </div>
-            </Transition>
-          </section>
+            :p1_name="match.p1Name"
+            :p2_name="match.p2Name"
+            :is_decision="match.is_decision"
+            :winner_side="match.winner_side"
+            :pulse="nowAdvancePulse"
+            :pop="decisionPop && match.is_decision"
+          />
         </div>
         <section
           v-else
@@ -383,6 +361,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useTournament } from "./tournament/useTournament";
+import NowUpCard from "./tournament/components/NowUpCard.vue";
 
 const {
   baseUrl,
@@ -485,18 +464,6 @@ function ordinalLabel(index) {
   return `${n}th Place`;
 }
 
-const NAME_FONT_MAX = 32;
-const NAME_FONT_MIN = 16;
-
-function nameStyle(name) {
-  const len = String(name || "").length;
-  // Scale down gently for longer names while keeping a readable floor.
-  let size = NAME_FONT_MAX - Math.max(0, len - 12) * 0.45;
-  if (len > 28) size -= (len - 28) * 0.25;
-  size = Math.max(NAME_FONT_MIN, Math.min(NAME_FONT_MAX, size));
-  return { fontSize: `${size}px` };
-}
-
 const routeTournamentId = computed(() => {
   const value = route.params.tournamentId;
   if (Array.isArray(value)) return value[0] || "";
@@ -574,13 +541,11 @@ const activeBracketIdsSet = computed(() => new Set(activeBracketIds.value));
 const nowAdvancePulse = ref(false);
 const recentDecision = ref(null);
 const decisionMatch = ref(null);
-const decisionHighlightId = ref(null);
-const swooshActive = ref(false);
-const swooshSide = ref("left");
+const decisionEpoch = ref(0);
 const decisionPop = ref(false);
 let nowPulseTimer = null;
 let decisionToastTimer = null;
-let swooshTimer = null;
+let decisionDisplayTimer = null;
 let decisionPopTimer = null;
 
 const currentMatches = computed(() => payload.value?.current_matches || []);
@@ -728,6 +693,35 @@ const displayNowList = computed(() => {
     p1Name: match.p1Name,
     p2Name: match.p2Name,
   }));
+});
+
+const display_now_cards = computed(() => {
+  const base = (displayNowList.value || []).map((match) => ({
+    ...match,
+    is_decision: false,
+    winner_side: "",
+  }));
+  const decided = decisionMatch.value;
+  if (!decided) return base;
+
+  const decision_card = {
+    key: `decision-${decided.id}-${decisionEpoch.value}`,
+    sourceId: decided.id,
+    p1Name: decided.p1Name,
+    p2Name: decided.p2Name,
+    is_decision: true,
+    winner_side: decided.winnerSide || "left",
+  };
+
+  const matchIndex = base.findIndex((match) => match.sourceId === decided.id);
+  if (matchIndex >= 0) {
+    const replaced = [...base];
+    replaced.splice(matchIndex, 1, decision_card);
+    return replaced;
+  }
+
+  const maxCards = Math.max(1, base.length || 1);
+  return [decision_card, ...base].slice(0, maxCards);
 });
 
 const sortedBrackets = computed(() => {
@@ -969,10 +963,9 @@ watch(
       bracketName: decided.bracketName,
       roundLabel: decided.roundLabel,
       bestOf: decided.bestOf,
+      winnerSide,
     };
-    decisionHighlightId.value = decidedId;
-    swooshSide.value = winnerSide;
-    swooshActive.value = true;
+    decisionEpoch.value += 1;
     decisionPop.value = true;
     recentDecision.value = {
       id: decided.id,
@@ -986,14 +979,13 @@ watch(
     decisionToastTimer = window.setTimeout(() => {
       recentDecision.value = null;
     }, 4200);
-    if (swooshTimer) window.clearTimeout(swooshTimer);
-    swooshTimer = window.setTimeout(() => {
-      swooshActive.value = false;
-    }, 1100);
+    if (decisionDisplayTimer) window.clearTimeout(decisionDisplayTimer);
+    decisionDisplayTimer = window.setTimeout(() => {
+      decisionMatch.value = null;
+    }, 1400);
     if (decisionPopTimer) window.clearTimeout(decisionPopTimer);
     decisionPopTimer = window.setTimeout(() => {
       decisionPop.value = false;
-    decisionHighlightId.value = null;
     }, 520);
   },
   { flush: "post" }
@@ -1003,7 +995,6 @@ onBeforeUnmount(() => {
   if (nowPulseTimer) window.clearTimeout(nowPulseTimer);
   if (decisionToastTimer) window.clearTimeout(decisionToastTimer);
   if (decisionDisplayTimer) window.clearTimeout(decisionDisplayTimer);
-  if (swooshTimer) window.clearTimeout(swooshTimer);
   if (decisionPopTimer) window.clearTimeout(decisionPopTimer);
 });
 
@@ -1282,18 +1273,30 @@ function tournamentLabel(tournament) {
 .now-container > .now-card {
   width: 100%;
 }
-.now-card.pulse::after {
+.now-card.pulse .now-hero::after {
   content: "";
   position: absolute;
   inset: -20% -10%;
+  pointer-events: none;
   background: radial-gradient(circle, rgba(120, 200, 255, 0.35), transparent 60%);
   animation: nowPulse 1.4s ease-out;
 }
 .now-card.decision {
-  box-shadow: 0 25px 55px rgba(60, 140, 255, 0.35);
+  box-shadow: 0 28px 62px rgba(60, 180, 255, 0.4);
 }
 .now-card.pop {
   animation: decisionHop 0.5s ease-out;
+}
+.now-card.decision::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+}
+.now-card.pop.decision::after {
+  opacity: 1;
+  animation: decisionSweep 0.7s ease-out;
 }
 .now-head {
   position: absolute;
@@ -1333,9 +1336,17 @@ function tournamentLabel(tournament) {
   max-width: 100%;
   justify-self: center;
   line-height: 1.15;
+  transition: color 0.24s ease, opacity 0.24s ease, text-shadow 0.24s ease;
 }
 .now-names .left { text-align: left; transform: translateY(-46px); }
 .now-names .right { text-align: left; justify-self: start; transform: translateY(46px); }
+.now-names .name.winner {
+  color: #8dffd5;
+  text-shadow: 0 10px 24px rgba(92, 255, 184, 0.45);
+}
+.now-names .name.loser {
+  opacity: 0.45;
+}
 .now-names .vs {
   font-size: 34px;
   font-weight: 900;
@@ -1361,10 +1372,6 @@ function tournamentLabel(tournament) {
 }
 .now-names .vs::before { right: calc(100% + 10px); }
 .now-names .vs::after { left: calc(100% + 10px); }
-
-.swoosh {
-  display: none !important;
-}
 
 .decision-toast {
   position: fixed;
@@ -1655,8 +1662,30 @@ function tournamentLabel(tournament) {
   30% { transform: translateY(-4px) scale(1.015); }
   100% { transform: translateY(0) scale(1); }
 }
-@keyframes swooshLeft {}
-@keyframes swooshRight {}
+@keyframes decisionSweep {
+  0% {
+    transform: translateX(-32%);
+    background: linear-gradient(
+      90deg,
+      rgba(120, 220, 255, 0) 0%,
+      rgba(120, 220, 255, 0.34) 45%,
+      rgba(120, 255, 200, 0.4) 50%,
+      rgba(120, 220, 255, 0.34) 55%,
+      rgba(120, 220, 255, 0) 100%
+    );
+  }
+  100% {
+    transform: translateX(32%);
+    background: linear-gradient(
+      90deg,
+      rgba(120, 220, 255, 0) 0%,
+      rgba(120, 220, 255, 0.2) 45%,
+      rgba(120, 255, 200, 0.28) 50%,
+      rgba(120, 220, 255, 0.2) 55%,
+      rgba(120, 220, 255, 0) 100%
+    );
+  }
+}
 
 @media (max-width: 1200px) {
   .topbar-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -1713,8 +1742,8 @@ function tournamentLabel(tournament) {
   .fx-grid,
   .fx-scan,
   .brand-icon span,
-  .now-card.pulse::after,
-  .swoosh,
+  .now-card.pulse .now-hero::after,
+  .now-card.pop.decision::after,
   .now-card.pop {
     animation: none;
   }
